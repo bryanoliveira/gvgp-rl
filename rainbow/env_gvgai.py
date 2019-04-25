@@ -42,9 +42,20 @@ class Env:
         return torch.stack(list(self.state_buffer), 0)
 
     def step(self, action):
+        # Repeat action 4 times, max pool over last 2 frames
+        frame_buffer = torch.zeros(2, 84, 84, device=self.device)
         reward, done = 0, False
-        self.obs, reward, done, debug = self.env.step(action)
-        self.state_buffer.append(self._get_state())
+        for t in range(4):
+            self.obs, treward, done, debug = self.env.step(action)
+            reward += treward
+            if t == 2:
+                frame_buffer[0] = self._get_state()
+            elif t == 3:
+                frame_buffer[1] = self._get_state()
+            if done:
+                break
+        observation = frame_buffer.max(0)[0]
+        self.state_buffer.append(observation)
         self.frame += 1
         if self.frame >= self.max_frames:
             done = True
