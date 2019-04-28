@@ -1,81 +1,57 @@
 import argparse
+from collections import deque
 import copy
 from functools import partial
+import gc
 import logging
 from multiprocessing.pool import ThreadPool
 import os
 import pickle
+import random
+import sys
 import time
-import cv2
+
 # from evostra import EvolutionStrategy
 from pytorch_es import EvolutionModule
+from pytorch_es.utils.helpers import weights_init
 import gym
-from gym import logger as gym_logger
 import numpy as np
+from PIL import Image
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
+import torchvision
 from torchvision import transforms
-from PIL import Image
-
-gym_logger.setLevel(logging.CRITICAL)
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-w', '--weights_path', type=str, required=True, help='Path to save final weights')
-parser.add_argument('-c', '--disable_cuda', action='store_true', help='Whether or not to use CUDA')
-parser.set_defaults(cuda=False)
+parser.add_argument('-w', '--weights_path', default='results/weights.pkl', type=str, help='Path to save final weights')
+parser.add_argument('-c', '--disable_cuda', default=False, action='store_true', help='Whether or not to use CUDA')
 
 args = parser.parse_args()
 
-_num_features = 16
+cuda = not args.disable_cuda and torch.cuda.is_available()
 
+num_features = 16
 transform = transforms.Compose([
-    transforms.Resize((128, 128)),
+    transforms.Resize((64,64)),
+    transforms.Grayscale(),
     transforms.ToTensor()
 ])
 
-
-class InvadersModel(nn.Module):
-    def __init__(self, num_features):
-        super(InvadersModel, self).__init__()
-        self.main = nn.Sequential(
-            nn.Conv2d(4096, num_features, 4, 2, 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(num_features, num_features * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(num_features * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(num_features * 2, num_features * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(num_features * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(num_features * 4, num_features * 8, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(num_features * 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(num_features * 8, num_features * 16, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(num_features * 16),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(num_features * 16, 6, 4, 1, 0, bias=False),
-            nn.Softmax(1)
-        )
-
-    def forward(self, input):
-        main = self.main(input)
-        return main
+model = nn.Sequential(
+    nn.Linear(128, 200),
+    nn.ReLU(),
+    nn.Linear(200, 500),
+    nn.ReLU(),
+    nn.Linear(500, 6),
+    nn.Softmax(1)
+)
 
 
-global_model = InvadersModel(_num_features)
+if cuda:
+    model = model.cuda()
 
-if torch.cuda.is_available() and not args.disable_cuda:
-    args.device = torch.device('cuda')
-    torch.cuda.manual_seed(np.random.randint(1, 10000))
-    torch.backends.cudnn.enabled = False  # Disable nondeterministic ops (not sure if critical but better safe than sorry)
-    global_model = global_model.cuda()
-    print(' ' * 4 + 'Using GPU: Yes')
-else:
-    args.device = torch.device('cpu')
-    print(' ' * 4 + 'Using GPU: No')
-
-env = gym.make("SpaceInvaders-v0")
-
+env = gym.make("SpaceInvaders-ram-v0")
 
 def get_reward(weights, model, render=False):
     global env
@@ -87,35 +63,35 @@ def get_reward(weights, model, render=False):
         except:
             param.data = weights[i].data
 
-    obs = env.reset()
+    ob = env.reset()
     done = False
     total_reward = 0
     while not done:
         if render:
             env.render()
             time.sleep(0.005)
-
-        image = transform(Image.fromarray(obs))
-        image = image.unsqueeze(0)
-        image = image.cuda()
+        batch = torch.from_numpy(ob[np.newaxis,...]).float()
+        if cuda:
+            batch = batch.cuda()
         with torch.no_grad():
-            prediction = cloned_model(Variable(image))
+            prediction = cloned_model(Variable(batch))
         action = prediction.data.cpu().numpy().argmax()
-        obs, reward, done, _ = env.step(action)
+        ob, reward, done, _ = env.step(action)
 
         total_reward += reward
     env.close()
+    print(total_reward)
     return total_reward
 
 
-partial_func = partial(get_reward, model=global_model)
-mother_parameters = list(global_model.parameters())
+partial_func = partial(get_reward, model=model)
+mother_parameters = list(model.parameters())
 
 es = EvolutionModule(
     mother_parameters, partial_func, population_size=100,
     sigma=0.01, learning_rate=0.001, decay=0.9999,
     reward_goal=600, consecutive_goal_stopping=10, threadcount=1,
-    cuda=(args.device == torch.device('cuda')), render_test=True, save_path=os.path.abspath(args.weights_path)
+    cuda=cuda, render_test=True, save_path=os.path.abspath(args.weights_path)
 )
 
 start = time.time()
@@ -124,4 +100,4 @@ end = time.time() - start
 
 pickle.dump(final_weights, open(os.path.abspath(args.weights_path), 'wb'))
 
-result = partial_func(final_weights, render=True)
+reward = partial_func(final_weights, render=True)
