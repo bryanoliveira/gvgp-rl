@@ -30,6 +30,7 @@ parser.add_argument('-g', '--generations', type=int, default=1000, help='Number 
 parser.add_argument('-s', '--print_steps', type=int, default=10, help='Test and print agent every p steps.')
 parser.add_argument('-p', '--population', type=int, default=100, help='Population size.')
 parser.add_argument('--seed', type=int, default=123, help='Random seed for atari_py')
+parser.add_argument('--threads', type=int, default=1, help='Number of worker threads')
 parser.add_argument('--wrapper', type=str, default='gvgai', help='Game emulator wrapper framework')
 parser.add_argument('--game', type=str, default='gvgai-cec1-lvl0-v0', help='Game identifier')  # default='space_invaders' gvgai-cec1-lvl0-v0
 parser.add_argument('--max-episode-length', type=int, default=int(108e3), metavar='LENGTH',
@@ -37,6 +38,7 @@ parser.add_argument('--max-episode-length', type=int, default=int(108e3), metava
 parser.add_argument('--history-length', type=int, default=4, metavar='T', help='Number of consecutive states processed')
 parser.add_argument('--lr', type=float, default=0.0000625, metavar='η', help='Learning rate')
 parser.add_argument('--evaluate', action='store_true', help='Evaluate only')
+parser.add_argument('--render', action='store_true', help='Render on test')
 args = parser.parse_args()
 
 if args.wrapper == 'gvgai':
@@ -106,8 +108,8 @@ mother_parameters = list(model.parameters())
 es = EvolutionModule(
     mother_parameters, partial_func, population_size=args.population,
     sigma=0.01, learning_rate=args.lr, decay=0.9999,
-    reward_goal=600, consecutive_goal_stopping=10, threadcount=1,
-    cuda=(args.device == torch.device('cuda')), render_test=True, save_path=os.path.abspath(args.weights_path)
+    reward_goal=600, consecutive_goal_stopping=10, threadcount=args.threads,
+    cuda=(args.device == torch.device('cuda')), render_test=args.render, save_path=os.path.abspath(args.weights_path)
 )
 
 start = time.time()
