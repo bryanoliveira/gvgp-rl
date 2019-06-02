@@ -1,5 +1,5 @@
-# GVGAI Reinforcement Learning Models
-A collection of reinforcement learning models adapted to work with GVGAI-GYM framework.
+# General Video Game Playing Reinforcement Learning Agents
+A collection of reinforcement learning algorithms applied to General Video Game Playing.
 
 # Model architectures used:
  - [Rainbow: Combining Improvements in Deep Reinforcement Learning](https://arxiv.org/abs/1710.02298)
