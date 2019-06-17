@@ -5,7 +5,14 @@ Functions that use multiple times
 from torch import nn
 import torch
 import numpy as np
+import cv2
 
+
+def preprocess(state):
+    state = cv2.resize(state, (84, 84), interpolation=cv2.INTER_LINEAR)
+    state = cv2.cvtColor(state, cv2.COLOR_BGR2GRAY)
+    state = state.reshape(-1) / 255
+    return state
 
 def v_wrap(np_array, dtype=np.float32):
     if np_array.dtype != dtype:
