@@ -8,11 +8,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 import random
+from algorithms._interface import RLInterface
+from utils import np_torch_wrap
 
 
-class A3C(nn.Module):
+class Model(nn.Module):
     def __init__(self, s_dim, a_dim):
-        super(A3C, self).__init__()
+        super(Model, self).__init__()
         self.s_dim = s_dim
         self.a_dim = a_dim
         self.pi1 = nn.Linear(s_dim, 800) # (X, S_DIM) * (S_DIM, 200)
@@ -51,49 +53,75 @@ class A3C(nn.Module):
 
 
 class Worker(mp.Process):
-    def __init__(self, env_factory, gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, name, max_eps_length=1000, n_s=None, n_a=None):
+    def __init__(
+        self, 
+        worker_name,
+        env_factory,
+        f_checkpoint,
+        f_sync, 
+        res_queue, 
+        global_ep_counter,
+        update_global_delay=20,
+        max_eps=10000,
+        max_eps_length=1000,
+        n_s=None,
+        n_a=None,
+        render=False):
+
         super(Worker, self).__init__()
-        self.name = 'w%i' % name
-        self.global_max_r, self.g_ep, self.g_ep_r, self.res_queue = global_max_r, global_ep, global_ep_r, res_queue
-        self.gnet, self.opt = gnet, opt
+
+        # callback global functions
+        self.synchronize = f_sync  # push local gradients to global network
+        self.checkpoint = f_checkpoint  # calculate statistics and save paramenters when improvements are achieved
+
         self.env = env_factory()
-        self.lnet = A3C(n_s if n_s is not None else self.env.n_obs, n_a if n_a is not None else self.env.n_actions)           # local network
+        self.local_network = Model(n_s if n_s is not None else self.env.n_obs, n_a if n_a is not None else self.env.n_actions)           # local network
         self.update_global_delay = update_global_delay
-        self.gamma = gamma
-        self.max_eps = max_eps
+
+        # local worker config
+        self.name = 'w%i' % worker_name
+        self.render = render
+        self.max_eps = max_eps  # max episodes of all workers
         self.max_eps_length = max_eps_length
+        self.global_ep_counter = global_ep_counter
+        self.res_queue = res_queue  # shared queue to store results
 
     def run(self):
-        total_step = 1
-        while self.g_ep.value < self.max_eps:
-            s = self.env.reset()
+        thread_step = 1  # initialize thread step counter
+        while self.global_ep_counter.value < self.max_eps:  # repeat until T < Tmax
+            # here we don't reset gradients or synchronize thread-specific parameters with
+            # the global network - this will be treated in "self.synchronize" function 
             buffer_s, buffer_a, buffer_r = [], [], []
-            ep_r = 0.
-            ep_length = 0
-            while ep_length < self.max_eps_length:
-                #if self.name == 'w0':
-                #    self.env.render()
-                a = self.lnet.choose_action(v_wrap(s[None, :]))
-                s_, r, done, _ = self.env.step(a if a < self.env.n_actions else 0)
+            episode_reward = 0.
+            episode_step = 0  # Tstart = T (this is equivalent, but easier to understand)
+            state = self.env.reset()  # get state St
+            while episode_step < self.max_eps_length:  # repeat until terminal or T-Tstart==Tmax
+                if self.render and self.name == 'w0':
+                    self.env.render()
+
+                action = self.local_network.choose_action(np_torch_wrap(state[None, :]))  # perform at according to local policy
+                new_state, r, done, _ = self.env.step(action if action < self.env.n_actions else 0)  # receive reward Rt and new state St+1
                 if done: r = -1
-                ep_r += r
-                buffer_a.append(a)
-                buffer_s.append(s)
+                episode_reward += r  # accumulate reward
+                buffer_a.append(action)
+                buffer_s.append(state)
                 buffer_r.append(r)
 
-                if total_step % self.update_global_delay == 0 or done:  # update global and assign to local net
-                    # sync
-                    push_and_pull(self.opt, self.lnet, self.gnet, done, s_, buffer_s, buffer_a, buffer_r, self.gamma)
+                if thread_step % self.update_global_delay == 0 or done:  # update global and assign to local net
+                    # calculate R
+                    # for... accumulate gradients ... end for
+                    # perform asynchronous update on global network
+                    # send all last states/actions/rewards function to calculate accumulated gradients and push it to the global network
+                    self.synchronize(self.local_network, done, new_state, buffer_s, buffer_a, buffer_r)
                     buffer_s, buffer_a, buffer_r = [], [], []
 
-                    if done:  # done and print information
-                        record(self.gnet, self.global_max_r, self.g_ep, self.g_ep_r, ep_r, self.res_queue, self.name, self.env.name)
-                        break
-                s = s_
-                total_step += 1
-                ep_length += 1
+                    if done: break  # done and print information
 
-            record(self.gnet, self.global_max_r, self.g_ep, self.g_ep_r, ep_r, self.res_queue, self.name, self.env.name)
+                state = new_state
+                thread_step += 1  # t = t + 1
+                episode_step += 1  # T = T + 1
+
+            self.checkpoint(episode_reward, self.name)
 
         self.res_queue.put(None)
 
@@ -115,97 +143,129 @@ class SharedAdam(torch.optim.Adam):
                 state['exp_avg_sq'].share_memory_()
 
 
-def v_wrap(np_array, dtype=np.float32):
-    if np_array.dtype != dtype:
-        np_array = np_array.astype(dtype)
-    return torch.from_numpy(np_array)
+class A3C(RLInterface):
+    def __init__(
+        self, 
+        env_factory, 
+        save_load_path = "trained_models", 
+        skip_load = False,
+        render = False,
+        n_workers = mp.cpu_count(), 
+        gamma = 0.9, 
+        update_global_delay = 20,
+        max_eps = 10000,
+        max_eps_length = 1000):
 
+        super(A3C, self).__init__()
 
-def push_and_pull(opt, lnet, gnet, done, s_, bs, ba, br, gamma):
-    if done:
-        v_s_ = 0.               # terminal
-    else:
-        v_s_ = lnet.forward(v_wrap(s_[None, :]))[-1].data.numpy()[0, 0]
+        # init temp env to get it's properties
+        env = env_factory[0]() if type(env_factory) is list else env_factory()
+        self.env_name = env.name
+        
+        # initialize global network
+        self.global_network = Model(env.n_obs, env.n_actions)
+        self.save_load_path = save_load_path
+        if not skip_load:
+            self.load()
 
-    buffer_v_target = []
-    for r in br[::-1]:    # reverse buffer r
-        v_s_ = r + gamma * v_s_
-        buffer_v_target.append(v_s_)
-    buffer_v_target.reverse()
+        self.global_network.share_memory()  # share the global parameters in multiprocessing
 
-    loss = lnet.loss_func(
-        v_wrap(np.vstack(bs)),
-        v_wrap(np.array(ba), dtype=np.int64) if ba[0].dtype == np.int64 else v_wrap(np.vstack(ba)),
-        v_wrap(np.array(buffer_v_target)[:, None]))
+        # configure shared parameters
+        self.gamma = gamma
+        self.optimizer = SharedAdam(self.global_network.parameters(), lr=0.0001)  # global optimizer
+        self.current_max_reward = mp.Value('d', float("-inf"))  # max reward threshold
+        self.global_ep_counter = mp.Value('i', 0)
+        self.global_ep_reward = mp.Value('d', 0.)  # current episode reward
+        self.res_queue = mp.Queue()  # queue to receive workers statistics
 
-    # calculate local gradients and push local parameters to global
-    opt.zero_grad()
-    loss.backward()
-    for lp, gp in zip(lnet.parameters(), gnet.parameters()):
-        gp._grad = lp.grad
-    opt.step()
+        # instantiate workers
+        self.workers = [
+            Worker(
+                worker_name=i,
+                # assign a random environment for each worker, if multiple envs are received 
+                env_factory = env_factory[random.randint(0, len(env_factory) - 1)] if type(env_factory) is list else env_factory, 
+                f_checkpoint = self.checkpoint,
+                f_sync = self.sync,
+                res_queue = self.res_queue,
+                global_ep_counter = self.global_ep_counter, 
+                update_global_delay = update_global_delay, 
+                max_eps = max_eps,
+                max_eps_length = 1000, 
+                n_s = None,
+                n_a = env.n_actions,
+                render = render
+            ) for i in range(n_workers)
+        ]
 
-    # pull global parameters
-    lnet.load_state_dict(gnet.state_dict())
+    def run(self):
+        # run workers and register statistics
+        [w.start() for w in self.workers]
+        res = []  # record episode reward to plot
+        while True:
+            r = self.res_queue.get()
+            if r is not None:
+                res.append(r)
+            else:
+                break
+        [w.join() for w in workers]
 
+        # show statistics
+        plt.plot(res)
+        plt.ylabel('Moving average episode reward')
+        plt.xlabel('Step')
+        plt.show()
 
-def record(gnet, global_max_r, global_ep, global_ep_r, ep_r, res_queue, name, env_name):
-    with global_ep.get_lock():
-        global_ep.value += 1
-    with global_ep_r.get_lock():
-        if global_ep_r.value == 0.:
-            global_ep_r.value = ep_r
-        else:
-            global_ep_r.value = global_ep_r.value * 0.99 + ep_r * 0.01
-    with global_max_r.get_lock():
-        if global_max_r.value < ep_r:
-            global_max_r.value = ep_r
-            save_model(gnet, env_name)
+    def sync(self, local_network, done, s_, bs, ba, br):
+        # calculate R
+        if done:
+            R = 0.  # for terminal St
+        else: # for non-terminal St // Bootstrap from last state
+            R = local_network.forward(np_torch_wrap(s_[None, :]))[-1].data.numpy()[0, 0]
 
-    res_queue.put(global_ep_r.value)
-    print(
-        name,
-        "Ep:", global_ep.value,
-        "| Ep_r: %.0f" % global_ep_r.value,
-    )
+        # for i E {t - 1, ..., Tstart}
+        buffer_v_target = []
+        for r in br[::-1]:    # reverse buffer r
+            R = r + self.gamma * R
+            buffer_v_target.append(R)
+        buffer_v_target.reverse()
 
-def save_model(model, env_name):
-    torch.save(model.state_dict(), os.path.join('trained_models', env_name + '.pth'))
-    print("Model saved.")
+        # accumulate gradients
+        loss = local_network.loss_func(
+            np_torch_wrap(np.vstack(bs)),
+            np_torch_wrap(np.array(ba), dtype=np.int64) if ba[0].dtype == np.int64 else np_torch_wrap(np.vstack(ba)),
+            np_torch_wrap(np.array(buffer_v_target)[:, None]))
 
-def load_model(model, path):
-    model.load_state_dict(torch.load(path, map_location='cpu'))
-    print("Model " + path + " loaded.")
+        # perform asynchronous update of Θ using dΘ and of Θv using dΘv
+        self.optimizer.zero_grad()
+        loss.backward()
+        for lp, gp in zip(local_network.parameters(), self.global_network.parameters()):
+            gp._grad = lp.grad
+        self.optimizer.step()
 
-def run(env_factory, load_path = "trained_models", skip_load=False, update_global_delay=50, gamma=0.9, max_eps=4000):
-    env = env_factory() if type(env_factory) is not list else env_factory[0]()
+        # synchronize thread-specific parameters Θ' = Θ and Θ'v = Θv
+        local_network.load_state_dict(self.global_network.state_dict())
 
-    gnet = A3C(env.n_obs, env.n_actions)  # global network
-    load_path = os.path.join(load_path, env.name + '.pth')
-    if not skip_load and os.path.isfile(load_path):
-        load_model(gnet, load_path)
+    def checkpoint(self, episode_reward, worker_name):
+        # increment global episode counter
+        with self.global_ep_counter.get_lock():
+            self.global_ep_counter.value += 1
 
-    gnet.share_memory()  # share the global parameters in multiprocessing
-    opt = SharedAdam(gnet.parameters(), lr=0.0001)  # global optimizer
-    global_max_r, global_ep, global_ep_r, res_queue = mp.Value('d', float("-inf")), mp.Value('i', 0), mp.Value('d', 0.), mp.Queue()
+        # update global moving average reward
+        with self.global_ep_reward.get_lock():
+            if self.global_ep_reward.value == 0.:
+                self.global_ep_reward.value = episode_reward
+            else:
+                self.global_ep_reward.value = self.global_ep_reward.value * 0.99 + episode_reward * 0.01
 
-    # parallel training
-    workers = [
-        Worker(env_factory[random.randint(0, len(env_factory) - 1)] if type(env_factory) is list else env_factory, 
-                gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, i, n_a=env.n_actions) 
-        for i in range(mp.cpu_count())
-    ]
-    [w.start() for w in workers]
-    res = []                    # record episode reward to plot
-    while True:
-        r = res_queue.get()
-        if r is not None:
-            res.append(r)
-        else:
-            break
-    [w.join() for w in workers]
+        # check if max reward threshold have been surpassed
+        with self.current_max_reward.get_lock():
+            if self.current_max_reward.value < episode_reward:
+                self.current_max_reward.value = episode_reward
+                self.save()
 
-    plt.plot(res)
-    plt.ylabel('Moving average ep reward')
-    plt.xlabel('Step')
-    plt.show()
+        self.res_queue.put(self.global_ep_reward.value)
+        print(
+            worker_name,
+            "Ep:", self.global_ep_counter.value,
+            "| Ep_r: %.0f" % self.global_ep_reward.value,
+        )
