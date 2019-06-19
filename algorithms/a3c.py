@@ -51,7 +51,7 @@ class A3C(nn.Module):
 
 
 class Worker(mp.Process):
-    def __init__(self, env_factory, gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, name, n_s=None, n_a=None):
+    def __init__(self, env_factory, gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, name, max_eps_length=1000, n_s=None, n_a=None):
         super(Worker, self).__init__()
         self.name = 'w%i' % name
         self.global_max_r, self.g_ep, self.g_ep_r, self.res_queue = global_max_r, global_ep, global_ep_r, res_queue
@@ -61,6 +61,7 @@ class Worker(mp.Process):
         self.update_global_delay = update_global_delay
         self.gamma = gamma
         self.max_eps = max_eps
+        self.max_eps_length = max_eps_length
 
     def run(self):
         total_step = 1
@@ -68,9 +69,10 @@ class Worker(mp.Process):
             s = self.env.reset()
             buffer_s, buffer_a, buffer_r = [], [], []
             ep_r = 0.
-            while True:
-                #if self.name == 'w0':
-                #    self.env.render()
+            ep_length = 0
+            while ep_length < self.max_eps_length:
+                if self.name == 'w0':
+                    self.env.render()
                 a = self.lnet.choose_action(v_wrap(s[None, :]))
                 s_, r, done, _ = self.env.step(a if a < self.env.n_actions else 0)
                 if done: r = -1
@@ -89,6 +91,10 @@ class Worker(mp.Process):
                         break
                 s = s_
                 total_step += 1
+                ep_length += 1
+
+            record(self.gnet, self.global_max_r, self.g_ep, self.g_ep_r, ep_r, self.res_queue, self.name, self.env.name)
+
         self.res_queue.put(None)
 
 
@@ -171,7 +177,7 @@ def load_model(model, path):
     model.load_state_dict(torch.load(path, map_location='cpu'))
     print("Model " + path + " loaded.")
 
-def run(env_factory, load_path = "trained_models", skip_load=False, update_global_delay=10, gamma=0.9, max_eps=4000):
+def run(env_factory, load_path = "trained_models", skip_load=False, update_global_delay=50, gamma=0.9, max_eps=4000):
     env = env_factory() if type(env_factory) is not list else env_factory[0]()
 
     gnet = A3C(env.n_obs, env.n_actions)  # global network
