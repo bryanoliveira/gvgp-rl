@@ -71,8 +71,8 @@ class Worker(mp.Process):
             ep_r = 0.
             ep_length = 0
             while ep_length < self.max_eps_length:
-                if self.name == 'w0':
-                    self.env.render()
+                #if self.name == 'w0':
+                #    self.env.render()
                 a = self.lnet.choose_action(v_wrap(s[None, :]))
                 s_, r, done, _ = self.env.step(a if a < self.env.n_actions else 0)
                 if done: r = -1
