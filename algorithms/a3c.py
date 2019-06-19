@@ -7,6 +7,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
+import random
 
 
 class A3C(nn.Module):
@@ -50,13 +51,13 @@ class A3C(nn.Module):
 
 
 class Worker(mp.Process):
-    def __init__(self, env_factory, gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, name):
+    def __init__(self, env_factory, gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, name, n_s=None, n_a=None):
         super(Worker, self).__init__()
         self.name = 'w%i' % name
         self.global_max_r, self.g_ep, self.g_ep_r, self.res_queue = global_max_r, global_ep, global_ep_r, res_queue
         self.gnet, self.opt = gnet, opt
         self.env = env_factory()
-        self.lnet = A3C(self.env.n_obs, self.env.n_actions)           # local network
+        self.lnet = A3C(n_s if n_s is not None else self.env.n_obs, n_a if n_a is not None else self.env.n_actions)           # local network
         self.update_global_delay = update_global_delay
         self.gamma = gamma
         self.max_eps = max_eps
@@ -84,7 +85,7 @@ class Worker(mp.Process):
                     buffer_s, buffer_a, buffer_r = [], [], []
 
                     if done:  # done and print information
-                        record(self.gnet, self.global_max_r, self.g_ep, self.g_ep_r, ep_r, self.res_queue, self.name)
+                        record(self.gnet, self.global_max_r, self.g_ep, self.g_ep_r, ep_r, self.res_queue, self.name, self.env.name)
                         break
                 s = s_
                 total_step += 1
@@ -142,7 +143,7 @@ def push_and_pull(opt, lnet, gnet, done, s_, bs, ba, br, gamma):
     lnet.load_state_dict(gnet.state_dict())
 
 
-def record(gnet, global_max_r, global_ep, global_ep_r, ep_r, res_queue, name):
+def record(gnet, global_max_r, global_ep, global_ep_r, ep_r, res_queue, name, env_name):
     with global_ep.get_lock():
         global_ep.value += 1
     with global_ep_r.get_lock():
@@ -153,7 +154,7 @@ def record(gnet, global_max_r, global_ep, global_ep_r, ep_r, res_queue, name):
     with global_max_r.get_lock():
         if global_max_r.value < ep_r:
             global_max_r.value = ep_r
-            save_model(gnet)
+            save_model(gnet, env_name)
 
     res_queue.put(global_ep_r.value)
     print(
@@ -162,19 +163,20 @@ def record(gnet, global_max_r, global_ep, global_ep_r, ep_r, res_queue, name):
         "| Ep_r: %.0f" % global_ep_r.value,
     )
 
-def save_model(model):
-    torch.save(model.state_dict(), os.path.join('results', 'model.pth'))
+def save_model(model, env_name):
+    torch.save(model.state_dict(), os.path.join('trained_models', env_name + '.pth'))
     print("Model saved.")
 
 def load_model(model, path):
     model.load_state_dict(torch.load(path, map_location='cpu'))
     print("Model " + path + " loaded.")
 
-def run(env_factory, load_path = "results/model.pth", update_global_delay=10, gamma=0.9, max_eps=4000):
-    env = env_factory()
+def run(env_factory, load_path = "trained_models", skip_load=False, update_global_delay=10, gamma=0.9, max_eps=4000):
+    env = env_factory() if type(env_factory) is not list else env_factory[0]()
 
     gnet = A3C(env.n_obs, env.n_actions)  # global network
-    if load_path:
+    load_path = os.path.join(load_path, env.name + '.pth')
+    if not skip_load and os.path.isfile(load_path):
         load_model(gnet, load_path)
 
     gnet.share_memory()  # share the global parameters in multiprocessing
@@ -182,7 +184,11 @@ def run(env_factory, load_path = "results/model.pth", update_global_delay=10, ga
     global_max_r, global_ep, global_ep_r, res_queue = mp.Value('d', float("-inf")), mp.Value('i', 0), mp.Value('d', 0.), mp.Queue()
 
     # parallel training
-    workers = [Worker(env_factory, gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, i) for i in range(mp.cpu_count())]
+    workers = [
+        Worker(env_factory[random.randint(0, len(env_factory) - 1)] if type(env_factory) is list else env_factory, 
+                gnet, opt, global_max_r, global_ep, global_ep_r, res_queue, update_global_delay, gamma, max_eps, i, n_a=env.n_actions) 
+        for i in range(mp.cpu_count())
+    ]
     [w.start() for w in workers]
     res = []                    # record episode reward to plot
     while True:
