@@ -72,7 +72,7 @@ class Worker(mp.Process):
                 #if self.name == 'w0':
                 #    self.env.render()
                 a = self.lnet.choose_action(v_wrap(s[None, :]))
-                s_, r, done, _ = self.env.step(a if a < self.env.action_space.n else 0)
+                s_, r, done, _ = self.env.step(a if a < self.env.n_actions else 0)
                 if done: r = -1
                 ep_r += r
                 buffer_a.append(a)
