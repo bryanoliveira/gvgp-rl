@@ -75,14 +75,14 @@ class Worker(mp.Process):
         self.checkpoint = f_checkpoint  # calculate statistics and save paramenters when improvements are achieved
 
         self.env = env_factory()
-        self.local_network = Model(n_s if n_s is not None else self.env.n_obs, n_a if n_a is not None else self.env.n_actions)           # local network
-        self.update_global_delay = update_global_delay
+        self.local_network = Model(n_s if n_s is not None else self.env.n_obs, n_a if n_a is not None else self.env.n_actions)  # local network
 
         # local worker config
         self.name = 'w%i' % worker_name
         self.render = render
         self.max_eps = max_eps  # max episodes of all workers
         self.max_eps_length = max_eps_length
+        self.update_global_delay = update_global_delay
         self.global_ep_counter = global_ep_counter
         self.res_queue = res_queue  # shared queue to store results
 
@@ -99,7 +99,7 @@ class Worker(mp.Process):
                 if self.render and self.name == 'w0':
                     self.env.render()
 
-                action = self.local_network.choose_action(np_torch_wrap(state[None, :]))  # perform at according to local policy
+                action = self.local_network.choose_action(np_torch_wrap(state[None, :]))  # perform At according to local policy
                 new_state, r, done, _ = self.env.step(action if action < self.env.n_actions else 0)  # receive reward Rt and new state St+1
                 if done: r = -1
                 episode_reward += r  # accumulate reward
