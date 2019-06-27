@@ -1,4 +1,5 @@
 import gym
+import logging
 
 
 class EnvInterface:
@@ -10,7 +11,7 @@ class EnvInterface:
         self.n_obs = self._img_size ** 2
         self.name = env_name
 
-        print("Instantiating " + env_name)
+        logging.info("Instantiated " + env_name)
 
     def step(self, action):
         state, reward, done, info = self.env.step(action)

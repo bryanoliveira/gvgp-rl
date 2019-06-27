@@ -1,11 +1,12 @@
 import argparse
 import multiprocessing as mp
+import logging
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='RL Algorithms')
-    parser.add_argument('--wrapper', type=str, default='atari', help='Game emulator wrapper framework')  # gym/gvgai
-    parser.add_argument('--model', type=str, default='a3c', help='RL model')
+    parser.add_argument('--wrapper', type=str, default='atari_conv', help='Game emulator wrapper framework')  # gym/gvgai
+    parser.add_argument('--model', type=str, default='a3c_conv', help='RL model')
     parser.add_argument('--game', type=str, default='SpaceInvaders-v0', help='ATARI game')  # default='SpaceInvaders-v0' gvgai-cec1-lvl0-v0
     parser.add_argument('--save-load-path', type=str, default='trained_models', help='Pretrained model')
     parser.add_argument('--skip-load', action='store_true', help='Skip loading the pretrained model')
@@ -16,9 +17,12 @@ if __name__ == "__main__":
     parser.add_argument('--max-eps', type=int, default=10000, help='Max number of episodes')
     parser.add_argument('--max-eps-length', type=int, default=1000, help='Max length of each episode')
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
+    parser.add_argument('--log', type=int, default=logging.INFO, help='Logging level')
 
     # Setup
     args = parser.parse_args()
+
+    logging.basicConfig(level=args.log, format='(%(levelname)s) %(asctime)s | %(filename)s -> %(funcName)s: \t %(message)s')
 
     if args.wrapper == 'atari_conv':
         from envs.atari_conv import Env
