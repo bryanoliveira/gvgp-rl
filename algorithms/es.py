@@ -120,6 +120,8 @@ class ES(RLInterface):
         
         super(ES, self).__init__()
 
+        self.name = "ES"
+
     def get_reward(weights, model, render=False):
         global env
         global max_episode_length

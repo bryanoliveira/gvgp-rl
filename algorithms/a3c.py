@@ -158,6 +158,8 @@ class A3C(RLInterface):
 
         super(A3C, self).__init__()
 
+        self.name = "A3C"
+
         # init temp env to get it's properties
         env = env_factory[0]() if type(env_factory) is list else env_factory()
         self.env_name = env.name

@@ -5,8 +5,19 @@ from envs._interface import EnvInterface
 
 
 class Env(EnvInterface):
-    def __init__(self, env_name):  
-        super(Env, self).__init__(env_name)       
+    def __init__(self, env_name, stack_frames=1):  
+        super(Env, self).__init__(env_name)
+
+        self.stack_frames = stack_frames
+
+    def reset(self):
+        state = super(Env, self).reset()
+        return state[None, :]
+
+    def step(self, action):
+        state, reward, done, info = super(Env, self).step(action)
+        
+        return state[None, :], reward, done, info
 
     def factory(env_name):
         return lambda : Env(env_name)

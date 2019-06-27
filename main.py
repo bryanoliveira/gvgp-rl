@@ -1,14 +1,12 @@
 import argparse
 import multiprocessing as mp
 
-from algorithms.a3c import A3C
-from algorithms.a2c_conv import A2C
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='RL Algorithms')
-    parser.add_argument('--wrapper', type=str, default='gvgai', help='Game emulator wrapper framework')  # gym/gvgai
+    parser.add_argument('--wrapper', type=str, default='atari', help='Game emulator wrapper framework')  # gym/gvgai
     parser.add_argument('--model', type=str, default='a3c', help='RL model')
-    parser.add_argument('--game', type=str, default='gvgai-cec1-lvl0-v0', help='ATARI game')  # default='space_invaders' gvgai-cec1-lvl0-v0
+    parser.add_argument('--game', type=str, default='SpaceInvaders-v0', help='ATARI game')  # default='SpaceInvaders-v0' gvgai-cec1-lvl0-v0
     parser.add_argument('--save-load-path', type=str, default='trained_models', help='Pretrained model')
     parser.add_argument('--skip-load', action='store_true', help='Skip loading the pretrained model')
     parser.add_argument('--render', action='store_true', help='Render the 0th worker')
@@ -22,11 +20,10 @@ if __name__ == "__main__":
     # Setup
     args = parser.parse_args()
 
-    if args.wrapper == 'atari':
-        if args.model == 'a2c':
-            from envs.atari_conv import Env
-        else 
-            from envs.atari import Env
+    if args.wrapper == 'atari_conv':
+        from envs.atari_conv import Env
+    elif args.wrapper == 'atari':
+        from envs.atari import Env
         if args.game == 'gvgai-cec1-lvl0-v0':
             args.game = 'SpaceInvaders-v0'
     elif args.wrapper == 'gvgai' or args.game == "gvgai-combo":
@@ -46,6 +43,25 @@ if __name__ == "__main__":
 
     if args.model == 'a3c':
 
+        from algorithms.a3c import A3C
+
+        a3c = A3C(
+            env_factory = factory or Env.factory(args.game), 
+            save_load_path = args.save_load_path,
+            skip_load = args.skip_load,
+            render = args.render,
+            n_workers = args.workers,
+            gamma = args.gamma,
+            update_global_delay = args.update_global_delay,
+            max_eps = args.max_eps,
+            max_eps_length = args.max_eps_length
+        )
+        a3c.run()
+
+    elif args.model == 'a3c_conv':
+
+        from algorithms.a3c_conv import A3C
+
         a3c = A3C(
             env_factory = factory or Env.factory(args.game), 
             save_load_path = args.save_load_path,
@@ -61,6 +77,8 @@ if __name__ == "__main__":
     
     elif args.model == 'a2c':
 
+        from algorithms.a2c_conv import A2C
+        
         a2c = A2C(
             env_factory = factory or Env.factory(args.game),
             save_load_path = args.save_load_path,
