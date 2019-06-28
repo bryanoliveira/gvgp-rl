@@ -22,7 +22,7 @@ if __name__ == "__main__":
     # Setup
     args = parser.parse_args()
 
-    logging.basicConfig(level=args.log, format='(%(levelname)s) %(asctime)s | %(filename)s -> %(funcName)s: \t %(message)s')
+    logging.basicConfig(level=args.log, format='(%(levelname)s) %(asctime)s | \033[0;1m%(filename)s -> %(funcName)s\033[0m: \t %(message)s')
 
     if args.wrapper == 'atari_conv':
         from envs.atari_conv import Env
@@ -38,6 +38,7 @@ if __name__ == "__main__":
             args.game = 'CartPole-v0'
 
     factory = False
+
     if args.game == "gvgai-combo":
         factory = [
             Env.factory("gvgai-cec1-lvl0-v0"), Env.factory("gvgai-cec1-lvl1-v0"), 
@@ -95,4 +96,3 @@ if __name__ == "__main__":
             max_eps_length = args.max_eps_length
         )
         a2c.run()
-        

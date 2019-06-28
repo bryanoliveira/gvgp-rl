@@ -181,7 +181,7 @@ class A3C(RLInterface):
         
         # initialize global network
         self.global_network = Model(env_shape, env.n_actions, env.stack_frames)
-        # self.global_network.cuda() ????
+        # self.global_network.cuda()
         self.save_load_path = save_load_path
         if not skip_load:
             self.load()
@@ -216,26 +216,41 @@ class A3C(RLInterface):
             ) for i in range(n_workers)
         ]
 
+        self.init_writer()  # instantiate tensorboard writer
+
     def run(self):
+        """
+        This method only runs on the main process.
+        """
+
         logging.info(self.logprefix + "Running workers")
-        # run workers and register statistics
+
         [w.start() for w in self.workers]
+
         res = []  # record episode reward to plot
         while True:
             r = self.res_queue.get()
             if r is not None:
-                res.append(r)
+                self.record(
+                    message=r["worker_name"],
+                    episode=r["episode"], 
+                    reward=r["reward"]
+                )
             else:
                 break
-        [w.join() for w in workers]
 
-        # show statistics
-        plt.plot(res)
-        plt.ylabel('Moving average episode reward')
-        plt.xlabel('Step')
-        plt.show()
+        [w.join() for w in self.workers]
 
     def sync(self, local_network, done, new_state, buffer_state, buffer_action, buffer_reward):
+        """
+        Remember: This method is called locally on all worker processes
+        It works because:
+        - Optimizer is shared
+        - Global network is shared
+        - We don't update self.gamma
+        TODO: move this code to the Worker's run loop to better match the paper
+        """
+
         # calculate R
         if done:
             R = 0.  # for terminal St
@@ -266,6 +281,11 @@ class A3C(RLInterface):
         local_network.load_state_dict(self.global_network.state_dict())
 
     def checkpoint(self, episode_reward, worker_name):
+        """
+        Remember: This method is called locally on all worker processes
+        It works because we only use shared variables and get their respective locks to update them.
+        """
+
         # increment global episode counter
         with self.global_ep_counter.get_lock():
             self.global_ep_counter.value += 1
@@ -283,10 +303,8 @@ class A3C(RLInterface):
                 self.current_max_reward.value = episode_reward
                 self.save()
 
-        self.res_queue.put(self.global_ep_reward.value)
-
-        super(A3C, self).checkpoint(
-            message=worker_name,
-            episode=self.global_ep_counter.value, 
-            reward=self.global_ep_reward.value
-        )
+        self.res_queue.put({
+            "worker_name": worker_name,
+            "reward": self.global_ep_reward.value,
+            "episode": self.global_ep_counter.value
+        })
