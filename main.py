@@ -22,7 +22,12 @@ if __name__ == "__main__":
     # Setup
     args = parser.parse_args()
 
-    logging.basicConfig(level=args.log, format='(%(levelname)s) %(asctime)s | \033[0;1m%(filename)s -> %(funcName)s\033[0m: \t %(message)s')
+    logging.basicConfig(
+        filename='output.log', 
+        filemode='w',
+        level=args.log, 
+        format='(%(levelname)s) %(asctime)s | \033[0;1m%(filename)s -> %(funcName)s\033[0m: \t %(message)s'
+    )
 
     if args.wrapper == 'atari_conv':
         from envs.atari_conv import Env
