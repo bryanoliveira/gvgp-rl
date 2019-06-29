@@ -18,6 +18,8 @@ if __name__ == "__main__":
     parser.add_argument('--max-eps-length', type=int, default=1000, help='Max length of each episode')
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
     parser.add_argument('--log', type=int, default=logging.INFO, help='Logging level')
+    parser.add_argument('--play', action='store_true', help='Play game')
+    parser.add_argument('--game-plays', type=int, default=5, help='Number of game plays')
 
     # Setup
     args = parser.parse_args()
@@ -83,7 +85,11 @@ if __name__ == "__main__":
             max_eps = args.max_eps,
             max_eps_length = args.max_eps_length
         )
-        a3c.run()   
+
+        if args.play:
+            a3c.play(args.game_plays)
+        else:
+             a3c.run()   
     
     elif args.model == 'a2c':
 

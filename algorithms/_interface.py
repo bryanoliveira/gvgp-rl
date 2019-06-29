@@ -12,6 +12,8 @@ class RLInterface:
         self.global_network = None
         self.env_name = None
         self.save_load_path = "trained_models"
+        self.save_path = True
+        self.env_factory = None
 
         self.writer = None
         atexit.register(self.on_exit)
@@ -20,7 +22,14 @@ class RLInterface:
         raise NotImplementedError()
         return
 
+    def play(self):
+        raise NotImplementedError()
+        return
+
     def save(self):
+        if not self.save_path:
+            return
+
         save_path = os.path.join(self.save_load_path, self.name + '_' + self.env_name + '.pth')
         torch.save(self.global_network.state_dict(), save_path)
         logging.info(self.logprefix + "Model saved to %s." % save_path)

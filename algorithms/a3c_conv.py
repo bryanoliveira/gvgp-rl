@@ -158,7 +158,7 @@ class Worker(mp.Process):
 class A3C(RLInterface):
     def __init__(
         self, 
-        env_factory, 
+        env_factory,
         save_load_path = "trained_models", 
         skip_load = False,
         render = False,
@@ -172,6 +172,7 @@ class A3C(RLInterface):
 
         self.name = "A3C_Conv"
         self.logprefix = "\033[0;1mA3C Global: \033[0m"
+        self.env_factory = env_factory
 
         # init temp env to get it's properties
         logging.info(self.logprefix + "Instantiating environment...")
@@ -182,6 +183,7 @@ class A3C(RLInterface):
         # initialize global network
         self.global_network = Model(env_shape, env.n_actions, env.stack_frames)
         # self.global_network.cuda()
+        self.render = render
         self.save_load_path = save_load_path
         if not skip_load:
             self.load()
@@ -227,7 +229,6 @@ class A3C(RLInterface):
 
         [w.start() for w in self.workers]
 
-        res = []  # record episode reward to plot
         while True:
             r = self.res_queue.get()
             if r is not None:
@@ -240,6 +241,31 @@ class A3C(RLInterface):
                 break
 
         [w.join() for w in self.workers]
+
+    def play(self, game_plays):
+
+        self.save_path = False
+        
+        logging.info('Playing game...')
+
+        for i in range(game_plays):
+            env = self.env_factory[random.randint(0, len(self.env_factory) - 1)]() if type(self.env_factory) is list else self.env_factory()
+            logging.info('Game ' + str(i+1))
+
+            state = env.reset()
+            terminal = False
+            game_reward = 0
+            while not terminal:
+                if self.render:
+                    env.render()
+
+                action_index = self.global_network.choose_action(np_torch_wrap(state[None, :]))
+                state, reward, terminal, info = env.step(action_index)
+                game_reward += reward
+            
+            logging.info('Reward ' + str(game_reward))
+            env.close()
+        
 
     def sync(self, local_network, done, new_state, buffer_state, buffer_action, buffer_reward):
         """
