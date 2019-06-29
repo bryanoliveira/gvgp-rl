@@ -13,6 +13,7 @@ class RLInterface:
         self.env_name = None
         self.save_load_path = "trained_models"
         self.save_path = True
+        self.isTraining = True
         self.env_factory = None
 
         self.writer = None
@@ -43,14 +44,17 @@ class RLInterface:
     def init_writer(self):
         self.writer = SummaryWriter(comment="-" + self.name + "_" + self.env_name)
 
-    def record(self, episode, reward, message=""):
-        logging.info(self.logprefix + "Episode %d  |  %s -  Reward: %.0f" % (episode, message, reward))
+    def record(self, scalar, argX, argY, message=""):
+        if self.isTraining:
+            logging.info(self.logprefix + "Episode %d  |  %s -  Reward: %.0f" % (argX, message, argY))
+        else:
+            logging.info(self.logprefix + "Game %d | %s - Reward: %.0f" % (argX, message, argY))
 
         if self.writer is None:
             logging.error(self.logprefix + "Tensorboard Writter was not initialized.")
             return
         else: 
-            self.writer.add_scalar('reward', reward, episode)  # reward / episode
+            self.writer.add_scalar(scalar, argY, argX)  
 
     def on_exit(self):
         self.save()  # save last state of our network

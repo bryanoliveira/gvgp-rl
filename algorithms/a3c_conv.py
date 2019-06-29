@@ -233,9 +233,10 @@ class A3C(RLInterface):
             r = self.res_queue.get()
             if r is not None:
                 self.record(
+                    scalar="rceward",
                     message=r["worker_name"],
-                    episode=r["episode"], 
-                    reward=r["reward"]
+                    argX=r["episode"], 
+                    argY=r["reward"]
                 )
             else:
                 break
@@ -245,12 +246,13 @@ class A3C(RLInterface):
     def play(self, game_plays):
 
         self.save_path = False
+        self.isTraining = False
         
-        logging.info('Playing game...')
+        logging.info(self.logprefix + 'Playing game...')
 
+        reward_mean = []
         for i in range(game_plays):
             env = self.env_factory[random.randint(0, len(self.env_factory) - 1)]() if type(self.env_factory) is list else self.env_factory()
-            logging.info('Game ' + str(i+1))
 
             state = env.reset()
             terminal = False
@@ -263,8 +265,16 @@ class A3C(RLInterface):
                 state, reward, terminal, info = env.step(action_index)
                 game_reward += reward
             
-            logging.info('Reward ' + str(game_reward))
+            self.record(
+                scalar='game',
+                argX=i+1,
+                argY=game_reward
+            )
+            reward_mean.append(game_reward)
             env.close()
+        
+        mean = np.array(reward_mean).mean()
+        logging.info(self.logprefix + 'Reward mean ' + str(mean))
         
 
     def sync(self, local_network, done, new_state, buffer_state, buffer_action, buffer_reward):
