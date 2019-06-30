@@ -32,3 +32,6 @@ class EnvInterface:
     def _preprocess(self, state):
         raise NotImplementedError()
         return None
+    
+    def close(self):
+        self.env.close()

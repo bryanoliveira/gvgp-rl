@@ -88,7 +88,7 @@ class Worker(mp.Process):
         global_ep_counter,
         update_global_delay=20,
         max_eps=10000,
-        max_eps_length=1000,
+        max_length=1000,
         n_s=None,
         n_a=None,
         render=False):
@@ -100,7 +100,7 @@ class Worker(mp.Process):
         self.logprefix = "\033[0;1mWorker %s:\033[0m " % self.name
         self.render = render
         self.max_eps = max_eps  # max episodes of all workers
-        self.max_eps_length = max_eps_length
+        self.max_length = max_length
         self.update_global_delay = update_global_delay
         self.global_ep_counter = global_ep_counter
         self.res_queue = res_queue  # shared queue to store results
@@ -133,7 +133,7 @@ class Worker(mp.Process):
             gradient_updates = 0
 
             state = self.env.reset()  # get state St
-            while episode_step < self.max_eps_length:  # repeat until terminal or T-Tstart==Tmax
+            while episode_step < self.max_length:  # repeat until terminal or T-Tstart==Tmax
                 if self.render and self.name == 'w0':
                     self.env.render()
 
@@ -184,7 +184,7 @@ class Worker(mp.Process):
 class A3C(RLInterface):
     def __init__(
         self, 
-        env_factory, 
+        env_factory,
         save_load_path = "trained_models", 
         skip_load = False,
         render = False,
@@ -192,12 +192,13 @@ class A3C(RLInterface):
         gamma = 0.9, 
         update_global_delay = 20,
         max_eps = 10000,
-        max_eps_length = 1000):
+        max_length = 1000):
 
         super(A3C, self).__init__()
 
         self.name = "A3C_Conv"
         self.logprefix = "\033[0;1mA3C Global: \033[0m"
+        self.env_factory = env_factory
 
         # init temp env to get it's properties
         logging.info(self.logprefix + "Instantiating environment...")
@@ -208,7 +209,9 @@ class A3C(RLInterface):
         # initialize global network
         self.global_network = Model(env_shape, env.n_actions, env.stack_frames)
         # self.global_network.cuda()
+        self.render = render
         self.save_load_path = save_load_path
+        self.init_jsonmanager()
         if not skip_load:
             self.load()
 
@@ -217,7 +220,6 @@ class A3C(RLInterface):
         # configure shared parameters
         self.gamma = gamma
         self.optimizer = SharedRMSprop(self.global_network.parameters(), lr=0.0001)  # global optimizer
-        self.current_max_reward = mp.Value('d', float("-inf"))  # max reward threshold
         self.global_ep_counter = mp.Value('i', 1)
         self.global_ep_reward = mp.Value('d', 0.)  # current episode reward
         self.res_queue = mp.Queue()  # queue to receive workers statistics
@@ -235,7 +237,7 @@ class A3C(RLInterface):
                 global_ep_counter = self.global_ep_counter, 
                 update_global_delay = update_global_delay, 
                 max_eps = max_eps,
-                max_eps_length = 1000, 
+                max_length = 1000, 
                 n_s = None,
                 n_a = env.n_actions,
                 render = render
@@ -255,7 +257,6 @@ class A3C(RLInterface):
 
         [w.start() for w in self.workers]
 
-        res = []  # record episode reward to plot
         while True:
             r = self.res_queue.get()
             if r is not None:
@@ -274,6 +275,38 @@ class A3C(RLInterface):
                 break
 
         [w.join() for w in self.workers]
+
+    def play(self, game_plays):
+        self.is_training = False
+        
+        logging.info(self.logprefix + 'Playing game...')
+
+        reward_mean = []
+        for i in range(game_plays):
+            env = self.env_factory[random.randint(0, len(self.env_factory) - 1)]() if type(self.env_factory) is list else self.env_factory()
+
+            state = env.reset()
+            terminal = False
+            game_reward = 0
+            while not terminal:
+                if self.render:
+                    env.render()
+
+                action_index = self.global_network.choose_action(np_torch_wrap(state[None, :]))
+                state, reward, terminal, info = env.step(action_index)
+                game_reward += reward
+            
+            self.record(
+                message=self.env_name,
+                episode=i+1,
+                reward=game_reward
+            )
+            reward_mean.append(game_reward)
+            env.close()
+        
+        mean = np.array(reward_mean).mean()
+        logging.info(self.logprefix + 'Reward mean ' + str(mean))
+        
 
     def sync(self, local_network, done, new_state, buffer_state, buffer_action, buffer_reward):
         """
@@ -342,12 +375,6 @@ class A3C(RLInterface):
                 self.global_ep_reward.value = episode_reward
             else:
                 self.global_ep_reward.value = self.global_ep_reward.value * 0.99 + episode_reward * 0.01
-
-        # check if max reward threshold have been surpassed
-        with self.current_max_reward.get_lock():
-            if self.current_max_reward.value < episode_reward:
-                self.current_max_reward.value = episode_reward
-                self.save()
 
         self.res_queue.put({
             "worker_name": worker_name,

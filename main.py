@@ -16,9 +16,11 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.9, help='Gamma value')
     parser.add_argument('--update-global-delay', type=int, default=20, help='Delay to update global network')
     parser.add_argument('--max-eps', type=int, default=10000, help='Max number of episodes')
-    parser.add_argument('--max-eps-length', type=int, default=1000, help='Max length of each episode')
+    parser.add_argument('--max-length', type=int, default=1000, help='Max length of each episode')
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
     parser.add_argument('--log', type=int, default=logging.INFO, help='Logging level')
+    parser.add_argument('--play', action='store_true', help='Play game')
+    parser.add_argument('--game-plays', type=int, default=5, help='Number of game plays')
 
     # Setup
     args = parser.parse_args()
@@ -53,6 +55,9 @@ if __name__ == "__main__":
             Env.factory("gvgai-cec3-lvl0-v0"), Env.factory("gvgai-cec3-lvl1-v0")
         ]
 
+    if args.play:
+        args.workers = 0  # it won't be a parallel worker
+
     if args.model == 'a3c':
 
         from algorithms.a3c import A3C
@@ -66,7 +71,7 @@ if __name__ == "__main__":
             gamma = args.gamma,
             update_global_delay = args.update_global_delay,
             max_eps = args.max_eps,
-            max_eps_length = args.max_eps_length
+            max_length = args.max_length
         )
         a3c.run()
 
@@ -83,9 +88,13 @@ if __name__ == "__main__":
             gamma = args.gamma,
             update_global_delay = args.update_global_delay,
             max_eps = args.max_eps,
-            max_eps_length = args.max_eps_length
+            max_length = args.max_length
         )
-        a3c.run()   
+
+        if args.play:
+            a3c.play(args.game_plays)
+        else:
+             a3c.run()   
     
     elif args.model == 'a2c':
 
@@ -100,6 +109,6 @@ if __name__ == "__main__":
             cuda = args.cuda,
             gamma = args.gamma,
             max_eps = args.max_eps,
-            max_eps_length = args.max_eps_length
+            max_length = args.max_length
         )
         a2c.run()
