@@ -9,7 +9,8 @@ import numpy as np
 import cv2
 import random
 from algorithms._interface import RLInterface
-from utils import np_torch_wrap
+from utils import np_torch_wrap, SharedAdam, SharedRMSprop
+import logging
 
 
 class Model(nn.Module):
@@ -60,31 +61,36 @@ class Worker(mp.Process):
         f_checkpoint,
         f_sync, 
         res_queue, 
+        global_network,
         global_ep_counter,
         update_global_delay=20,
         max_eps=10000,
-        max_eps_length=1000,
+        max_length=1000,
         n_s=None,
         n_a=None,
         render=False):
 
         super(Worker, self).__init__()
 
+        # local worker config
+        self.name = 'w%i' % worker_name
+        self.logprefix = "\033[0;1mWorker %s:\033[0m " % self.name
+        self.render = render
+        self.max_eps = max_eps  # max episodes of all workers
+        self.max_length = max_length
+        self.update_global_delay = update_global_delay
+        self.global_ep_counter = global_ep_counter
+        self.res_queue = res_queue  # shared queue to store results
+
         # callback global functions
         self.synchronize = f_sync  # push local gradients to global network
         self.checkpoint = f_checkpoint  # calculate statistics and save paramenters when improvements are achieved
 
+        logging.info(self.logprefix + "Instantiating environment...")
         self.env = env_factory()
         self.local_network = Model(n_s if n_s is not None else self.env.n_obs, n_a if n_a is not None else self.env.n_actions)  # local network
-
-        # local worker config
-        self.name = 'w%i' % worker_name
-        self.render = render
-        self.max_eps = max_eps  # max episodes of all workers
-        self.max_eps_length = max_eps_length
-        self.update_global_delay = update_global_delay
-        self.global_ep_counter = global_ep_counter
-        self.res_queue = res_queue  # shared queue to store results
+        # synchronize thread-specific parameters Θ' = Θ and Θ'v = Θv
+        self.local_network.load_state_dict(global_network.state_dict())
 
     def run(self):
         thread_step = 1  # initialize thread step counter
@@ -95,7 +101,7 @@ class Worker(mp.Process):
             episode_reward = 0.
             episode_step = 0  # Tstart = T (this is equivalent, but easier to understand)
             state = self.env.reset()  # get state St
-            while episode_step < self.max_eps_length:  # repeat until terminal or T-Tstart==Tmax
+            while episode_step < self.max_length:  # repeat until terminal or T-Tstart==Tmax
                 if self.render and self.name == 'w0':
                     self.env.render()
 
@@ -121,26 +127,9 @@ class Worker(mp.Process):
                 thread_step += 1  # t = t + 1
                 episode_step += 1  # T = T + 1
 
-            self.checkpoint(episode_reward, self.name)
+            self.checkpoint(episode_reward, self.name, episode_step)
 
         self.res_queue.put(None)
-
-
-class SharedAdam(torch.optim.Adam):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.9), eps=1e-8,
-                 weight_decay=0):
-        super(SharedAdam, self).__init__(params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        # State initialization
-        for group in self.param_groups:
-            for p in group['params']:
-                state = self.state[p]
-                state['step'] = 0
-                state['exp_avg'] = torch.zeros_like(p.data)
-                state['exp_avg_sq'] = torch.zeros_like(p.data)
-
-                # share in memory
-                state['exp_avg'].share_memory_()
-                state['exp_avg_sq'].share_memory_()
 
 
 class A3C(RLInterface):
@@ -154,29 +143,36 @@ class A3C(RLInterface):
         gamma = 0.9, 
         update_global_delay = 20,
         max_eps = 10000,
-        max_eps_length = 1000):
+        max_length = 1000):
 
         super(A3C, self).__init__()
 
-        self.name = "A3C"
+        self.name = "A3C_Conv"
+        self.logprefix = "\033[0;1mA3C Global: \033[0m"
+        self.env_factory = env_factory
 
         # init temp env to get it's properties
+        logging.info(self.logprefix + "Instantiating environment...")
         env = env_factory[0]() if type(env_factory) is list else env_factory()
-        self.env_name = env.name
+        self.env_name = env.name  # to save/load
+        
+        # free attributes
+        self.render = render
+        self.gamma = gamma
+        self.save_load_path = save_load_path
         
         # initialize global network
         self.global_network = Model(env.n_obs, env.n_actions)
-        self.save_load_path = save_load_path
+        self.global_network.share_memory()  # share the global parameters in multiprocessing
+        self.optimizer = SharedRMSprop(self.global_network.parameters(), lr=0.0001)  # global optimizer
+
+        self.init_writer()  # instantiate tensorboard writer
+
+        # load network, optimizer, episode count and max_reward
         if not skip_load:
             self.load()
 
-        self.global_network.share_memory()  # share the global parameters in multiprocessing
-
-        # configure shared parameters
-        self.gamma = gamma
-        self.optimizer = SharedAdam(self.global_network.parameters(), lr=0.0001)  # global optimizer
-        self.current_max_reward = mp.Value('d', float("-inf"))  # max reward threshold
-        self.global_ep_counter = mp.Value('i', 0)
+        self.global_ep_counter = mp.Value('i', self.episode)  # this is needed to control workers episode limit
         self.global_ep_reward = mp.Value('d', 0.)  # current episode reward
         self.res_queue = mp.Queue()  # queue to receive workers statistics
 
@@ -189,33 +185,44 @@ class A3C(RLInterface):
                 f_checkpoint = self.checkpoint,
                 f_sync = self.sync,
                 res_queue = self.res_queue,
+                global_network = self.global_network,
                 global_ep_counter = self.global_ep_counter, 
                 update_global_delay = update_global_delay, 
                 max_eps = max_eps,
-                max_eps_length = 1000, 
+                max_length = 1000, 
                 n_s = None,
                 n_a = env.n_actions,
                 render = render
             ) for i in range(n_workers)
         ]
 
+        self.init_writer()  # instantiate tensorboard writer
+
     def run(self):
-        # run workers and register statistics
+        """
+        This method only runs on the main process.
+        """
+
+        super(A3C, self).run()
+
+        logging.info(self.logprefix + "Running workers")
+
         [w.start() for w in self.workers]
-        res = []  # record episode reward to plot
+
         while True:
             r = self.res_queue.get()
             if r is not None:
-                res.append(r)
+                self.episode += 1
+                self.record(
+                    message=r["worker_name"],
+                    episode=self.episode, 
+                    reward=r["reward"],
+                    episode_length=r["episode_length"],
+                )
             else:
                 break
-        [w.join() for w in workers]
 
-        # show statistics
-        plt.plot(res)
-        plt.ylabel('Moving average episode reward')
-        plt.xlabel('Step')
-        plt.show()
+        [w.join() for w in self.workers]
 
     def sync(self, local_network, done, s_, bs, ba, br):
         # calculate R
@@ -247,27 +254,18 @@ class A3C(RLInterface):
         # synchronize thread-specific parameters Θ' = Θ and Θ'v = Θv
         local_network.load_state_dict(self.global_network.state_dict())
 
-    def checkpoint(self, episode_reward, worker_name):
+    def checkpoint(self, episode_reward, worker_name, episode_length):
         # increment global episode counter
         with self.global_ep_counter.get_lock():
             self.global_ep_counter.value += 1
 
         # update global moving average reward
         with self.global_ep_reward.get_lock():
-            if self.global_ep_reward.value == 0.:
-                self.global_ep_reward.value = episode_reward
-            else:
-                self.global_ep_reward.value = self.global_ep_reward.value * 0.99 + episode_reward * 0.01
+            self.global_ep_reward.value = episode_reward
 
-        # check if max reward threshold have been surpassed
-        with self.current_max_reward.get_lock():
-            if self.current_max_reward.value < episode_reward:
-                self.current_max_reward.value = episode_reward
-                self.save()
-
-        self.res_queue.put(self.global_ep_reward.value)
-        print(
-            worker_name,
-            "Ep:", self.global_ep_counter.value,
-            "| Ep_r: %.0f" % self.global_ep_reward.value,
-        )
+        self.res_queue.put({
+            "worker_name": worker_name,
+            "reward": self.global_ep_reward.value,
+            "episode": self.global_ep_counter.value,
+            "episode_length": episode_length
+        })

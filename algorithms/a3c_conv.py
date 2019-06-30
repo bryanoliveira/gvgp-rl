@@ -206,21 +206,23 @@ class A3C(RLInterface):
         env_shape = env.reset().shape
         self.env_name = env.name  # to save/load
         
+        # free attributes
+        self.render = render
+        self.gamma = gamma
+        self.save_load_path = save_load_path
+        
         # initialize global network
         self.global_network = Model(env_shape, env.n_actions, env.stack_frames)
-        # self.global_network.cuda()
-        self.render = render
-        self.save_load_path = save_load_path
-        self.init_jsonmanager()
+        self.global_network.share_memory()  # share the global parameters in multiprocessing
+        self.optimizer = SharedRMSprop(self.global_network.parameters(), lr=0.0001)  # global optimizer
+
+        self.init_writer()  # instantiate tensorboard writer
+
+        # load network, optimizer, episode count and max_reward
         if not skip_load:
             self.load()
 
-        self.global_network.share_memory()  # share the global parameters in multiprocessing
-
-        # configure shared parameters
-        self.gamma = gamma
-        self.optimizer = SharedRMSprop(self.global_network.parameters(), lr=0.0001)  # global optimizer
-        self.global_ep_counter = mp.Value('i', 1)
+        self.global_ep_counter = mp.Value('i', self.episode)  # this is needed to control workers episode limit
         self.global_ep_reward = mp.Value('d', 0.)  # current episode reward
         self.res_queue = mp.Queue()  # queue to receive workers statistics
 
@@ -244,8 +246,6 @@ class A3C(RLInterface):
             ) for i in range(n_workers)
         ]
 
-        self.init_writer()  # instantiate tensorboard writer
-
     def run(self):
         """
         This method only runs on the main process.
@@ -260,9 +260,10 @@ class A3C(RLInterface):
         while True:
             r = self.res_queue.get()
             if r is not None:
+                self.episode += 1
                 self.record(
                     message=r["worker_name"],
-                    episode=r["episode"], 
+                    episode=self.episode, 
                     reward=r["reward"],
                     episode_length=r["episode_length"],
                     mean_loss=r["mean_loss"],
@@ -275,37 +276,6 @@ class A3C(RLInterface):
                 break
 
         [w.join() for w in self.workers]
-
-    def play(self, game_plays):
-        self.is_training = False
-        
-        logging.info(self.logprefix + 'Playing game...')
-
-        reward_mean = []
-        for i in range(game_plays):
-            env = self.env_factory[random.randint(0, len(self.env_factory) - 1)]() if type(self.env_factory) is list else self.env_factory()
-
-            state = env.reset()
-            terminal = False
-            game_reward = 0
-            while not terminal:
-                if self.render:
-                    env.render()
-
-                action_index = self.global_network.choose_action(np_torch_wrap(state[None, :]))
-                state, reward, terminal, info = env.step(action_index)
-                game_reward += reward
-            
-            self.record(
-                message=self.env_name,
-                episode=i+1,
-                reward=game_reward
-            )
-            reward_mean.append(game_reward)
-            env.close()
-        
-        mean = np.array(reward_mean).mean()
-        logging.info(self.logprefix + 'Reward mean ' + str(mean))
         
 
     def sync(self, local_network, done, new_state, buffer_state, buffer_action, buffer_reward):
@@ -371,15 +341,11 @@ class A3C(RLInterface):
 
         # update global moving average reward
         with self.global_ep_reward.get_lock():
-            if self.global_ep_reward.value == 0.:
-                self.global_ep_reward.value = episode_reward
-            else:
-                self.global_ep_reward.value = self.global_ep_reward.value * 0.99 + episode_reward * 0.01
+            self.global_ep_reward.value = episode_reward
 
         self.res_queue.put({
             "worker_name": worker_name,
             "reward": self.global_ep_reward.value,
-            "episode": self.global_ep_counter.value,
             "episode_length": episode_length,
             "mean_loss": mean_loss,
             "mean_value_loss": mean_value_loss,

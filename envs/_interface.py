@@ -6,9 +6,9 @@ class EnvInterface:
     def __init__(self, env_name, _img_size=84):
         self._img_size = _img_size
 
-        self.env = gym.make(env_name).unwrapped
+        self.env = gym.make(env_name)
         self.n_actions = self.env.action_space.n
-        self.n_obs = self._img_size ** 2
+        self.n_obs = self.env.observation_space.shape[0]
         self.name = env_name
 
         logging.info("Instantiated " + env_name)
