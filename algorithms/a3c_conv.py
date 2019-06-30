@@ -185,6 +185,7 @@ class A3C(RLInterface):
         # self.global_network.cuda()
         self.render = render
         self.save_load_path = save_load_path
+        self.init_jsonmanager()
         if not skip_load:
             self.load()
 
@@ -193,7 +194,6 @@ class A3C(RLInterface):
         # configure shared parameters
         self.gamma = gamma
         self.optimizer = SharedRMSprop(self.global_network.parameters(), lr=0.0001)  # global optimizer
-        self.current_max_reward = mp.Value('d', float("-inf"))  # max reward threshold
         self.global_ep_counter = mp.Value('i', 0)
         self.global_ep_reward = mp.Value('d', 0.)  # current episode reward
         self.res_queue = mp.Queue()  # queue to receive workers statistics
@@ -233,7 +233,7 @@ class A3C(RLInterface):
             r = self.res_queue.get()
             if r is not None:
                 self.record(
-                    scalar="rceward",
+                    scalar="reward",
                     message=r["worker_name"],
                     argX=r["episode"], 
                     argY=r["reward"]
@@ -332,12 +332,6 @@ class A3C(RLInterface):
                 self.global_ep_reward.value = episode_reward
             else:
                 self.global_ep_reward.value = self.global_ep_reward.value * 0.99 + episode_reward * 0.01
-
-        # check if max reward threshold have been surpassed
-        with self.current_max_reward.get_lock():
-            if self.current_max_reward.value < episode_reward:
-                self.current_max_reward.value = episode_reward
-                self.save()
 
         self.res_queue.put({
             "worker_name": worker_name,
