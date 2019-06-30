@@ -1,3 +1,7 @@
+# TODO: Give credit 
+# https://ai.atamai.biz/files/atari_wrappers.py
+
+
 import numpy as np
 from collections import deque
 import gym
