@@ -79,8 +79,8 @@ class RLInterface:
             "Episode: " + str(episode) + "  |  " +
             "Time elapsed: " + time.strftime("%H:%M:%S", time.gmtime(time_elapsed)) + "  |  " +
             message + "  |  " +
-            "Reward: " + "{0:.2f}".format(reward) + "  |  " +
-            ("Mean Loss:" "{0:.2f}".format(mean_loss) if mean_loss else "")
+            "Reward: " + "{0:.2f}".format(reward) +
+            ("  |  Mean Loss:" + "{0:.2f}".format(mean_loss) if mean_loss else "")
         )
 
         if self.is_training:
