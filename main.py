@@ -8,7 +8,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='RL Algorithms')
     parser.add_argument('--wrapper', type=str, default='atari_conv', help='Game emulator wrapper framework')  # gym/gvgai
     parser.add_argument('--model', type=str, default='a3c_conv', help='RL model')
-    parser.add_argument('--game', type=str, default='SpaceInvaders-v0', help='ATARI game')  # default='SpaceInvaders-v0' gvgai-cec1-lvl0-v0
+    parser.add_argument('--game', type=str, default='SpaceInvadersNoFrameskip-v0', help='ATARI game')  # default='SpaceInvaders-v0' gvgai-cec1-lvl0-v0
     parser.add_argument('--save-load-path', type=str, default='trained_models', help='Pretrained model')
     parser.add_argument('--skip-load', action='store_true', help='Skip loading the pretrained model')
     parser.add_argument('--render', action='store_true', help='Render the 0th worker')
