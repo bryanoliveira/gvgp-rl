@@ -192,6 +192,7 @@ class A3C(RLInterface):
         n_workers = mp.cpu_count(), 
         gamma = 0.9, 
         update_global_delay = 20,
+        checkpoint_interval=10,
         max_eps = 10000,
         max_length = 1000):
 
