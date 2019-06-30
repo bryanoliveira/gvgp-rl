@@ -59,18 +59,21 @@ class Model(nn.Module):
         m = self.distribution(prob)
         return m.sample().numpy()[0]
 
-    def loss_func(self, s, a, v_t):
+    def loss_func(self, states, actions, target_values):
         self.train()
-        logits, values = self.forward(s)
-        td = v_t - values
-        c_loss = td.pow(2)
+        logits, values = self.forward(states)
+
+        advantage = target_values - values
+        value_loss = advantage.pow(2)
         
         probs = F.softmax(logits, dim=1)
         m = self.distribution(probs)
-        exp_v = m.log_prob(a) * td.detach().squeeze()
-        a_loss = -exp_v
-        total_loss = (c_loss + a_loss).mean()
-        return total_loss
+        exp_v = m.log_prob(actions) * advantage.detach().squeeze()  # log pi * A
+        policy_loss = -exp_v
+        total_loss = (value_loss + policy_loss).mean()  # mean squared error
+
+        # detach all except total_loss as it will be used later
+        return total_loss, value_loss.detach().mean(), policy_loss.detach().mean(), advantage.detach().mean()
 
 
 class Worker(mp.Process):
@@ -79,8 +82,8 @@ class Worker(mp.Process):
         worker_name,
         env_factory,
         f_checkpoint,
-        f_sync, 
-        res_queue, 
+        f_sync,
+        res_queue,
         global_network,
         global_ep_counter,
         update_global_delay=20,
@@ -123,6 +126,12 @@ class Worker(mp.Process):
             buffer_state, buffer_action, buffer_reward = [], [], []
             episode_reward = 0.
             episode_step = 0  # Tstart = T (this is equivalent, but easier to understand)
+            total_loss = 0
+            total_value_loss = 0
+            total_policy_loss = 0
+            total_advantage = 0
+            gradient_updates = 0
+
             state = self.env.reset()  # get state St
             while episode_step < self.max_eps_length:  # repeat until terminal or T-Tstart==Tmax
                 if self.render and self.name == 'w0':
@@ -141,16 +150,33 @@ class Worker(mp.Process):
                     # for... accumulate gradients ... end for
                     # perform asynchronous update on global network
                     # send all last states/actions/rewards function to calculate accumulated gradients and push it to the global network
-                    self.synchronize(self.local_network, done, new_state, buffer_state, buffer_action, buffer_reward)
+                    loss, mean_value_loss, mean_policy_loss, mean_advantage = self.synchronize(self.local_network, done, new_state, buffer_state, buffer_action, buffer_reward)
+
+                    gradient_updates += 1
+                    total_loss += loss
+                    total_value_loss += mean_value_loss
+                    total_policy_loss += mean_policy_loss
+                    total_advantage += mean_advantage
+
                     buffer_state, buffer_action, buffer_reward = [], [], []
 
-                    if done: break  # done and print information
+                    if done: break
 
                 state = new_state
                 thread_step += 1  # t = t + 1
                 episode_step += 1  # T = T + 1
 
-            self.checkpoint(episode_reward, self.name)
+            # save statistics of reward per episode, episode length, mean loss and gradient updates
+            self.checkpoint(
+                self.name, 
+                episode_reward, 
+                episode_step, 
+                total_loss / gradient_updates, 
+                total_value_loss / gradient_updates,
+                total_policy_loss / gradient_updates,
+                total_advantage / gradient_updates,
+                gradient_updates
+            )
 
         self.res_queue.put(None)
 
@@ -192,7 +218,7 @@ class A3C(RLInterface):
         self.gamma = gamma
         self.optimizer = SharedRMSprop(self.global_network.parameters(), lr=0.0001)  # global optimizer
         self.current_max_reward = mp.Value('d', float("-inf"))  # max reward threshold
-        self.global_ep_counter = mp.Value('i', 0)
+        self.global_ep_counter = mp.Value('i', 1)
         self.global_ep_reward = mp.Value('d', 0.)  # current episode reward
         self.res_queue = mp.Queue()  # queue to receive workers statistics
 
@@ -223,6 +249,8 @@ class A3C(RLInterface):
         This method only runs on the main process.
         """
 
+        super(A3C, self).run()
+
         logging.info(self.logprefix + "Running workers")
 
         [w.start() for w in self.workers]
@@ -234,7 +262,13 @@ class A3C(RLInterface):
                 self.record(
                     message=r["worker_name"],
                     episode=r["episode"], 
-                    reward=r["reward"]
+                    reward=r["reward"],
+                    episode_length=r["episode_length"],
+                    mean_loss=r["mean_loss"],
+                    gradient_updates=r["gradient_updates"],
+                    mean_value_loss=r["mean_value_loss"],
+                    mean_policy_loss=r["mean_policy_loss"],
+                    mean_advantage=r["mean_advantage"]
                 )
             else:
                 break
@@ -248,7 +282,7 @@ class A3C(RLInterface):
         - Optimizer is shared
         - Global network is shared
         - We don't update self.gamma
-        TODO: move this code to the Worker's run loop to better match the paper
+        TODO: move this code to the Worker's run loop to better match the paper and copy less data
         """
 
         # calculate R
@@ -265,10 +299,11 @@ class A3C(RLInterface):
         buffer_v_target.reverse()
         
         # accumulate gradients
-        loss = local_network.loss_func(
+        loss, mean_value_loss, mean_policy_loss, mean_advantage = local_network.loss_func(
             np_torch_wrap(np.array(buffer_state)),
             np_torch_wrap(np.array(buffer_action), dtype=np.int64) if buffer_action[0].dtype == np.int64 else np_torch_wrap(np.vstack(buffer_action)),
-            np_torch_wrap(np.array(buffer_v_target)[:, None]))
+            np_torch_wrap(np.array(buffer_v_target)[:, None])
+        )
         
         # perform asynchronous update of Θ using dΘ and of Θv using dΘv
         self.optimizer.zero_grad()
@@ -280,7 +315,18 @@ class A3C(RLInterface):
         # synchronize thread-specific parameters Θ' = Θ and Θ'v = Θv
         local_network.load_state_dict(self.global_network.state_dict())
 
-    def checkpoint(self, episode_reward, worker_name):
+        return loss.detach(), mean_value_loss, mean_policy_loss, mean_advantage
+
+    def checkpoint(
+        self, 
+        worker_name, 
+        episode_reward, 
+        episode_length, 
+        mean_loss,
+        mean_value_loss,
+        mean_policy_loss,
+        mean_advantage,
+        gradient_updates):
         """
         Remember: This method is called locally on all worker processes
         It works because we only use shared variables and get their respective locks to update them.
@@ -306,5 +352,11 @@ class A3C(RLInterface):
         self.res_queue.put({
             "worker_name": worker_name,
             "reward": self.global_ep_reward.value,
-            "episode": self.global_ep_counter.value
+            "episode": self.global_ep_counter.value,
+            "episode_length": episode_length,
+            "mean_loss": mean_loss,
+            "mean_value_loss": mean_value_loss,
+            "mean_policy_loss": mean_policy_loss,
+            "mean_advantage": mean_advantage,
+            "gradient_updates": gradient_updates
         })

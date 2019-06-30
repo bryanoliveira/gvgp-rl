@@ -1,6 +1,7 @@
 import argparse
 import multiprocessing as mp
 import logging
+import sys
 
 
 if __name__ == "__main__":
@@ -28,6 +29,7 @@ if __name__ == "__main__":
         level=args.log, 
         format='(%(levelname)s) %(asctime)s | \033[0;1m%(filename)s -> %(funcName)s\033[0m: \t %(message)s'
     )
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
     if args.wrapper == 'atari_conv':
         from envs.atari_conv import Env
