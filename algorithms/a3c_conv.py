@@ -261,21 +261,25 @@ class A3C(RLInterface):
         [w.start() for w in self.workers]
 
         while True:
-            r = self.res_queue.get()
-            if r is not None:
-                self.episode += 1
-                self.record(
-                    message=r["worker_name"],
-                    episode=self.episode, 
-                    reward=r["reward"],
-                    episode_length=r["episode_length"],
-                    mean_loss=r["mean_loss"],
-                    gradient_updates=r["gradient_updates"],
-                    mean_value_loss=r["mean_value_loss"],
-                    mean_policy_loss=r["mean_policy_loss"],
-                    mean_advantage=r["mean_advantage"]
-                )
-            else:
+            try:  # avoid res_queue file deletion error
+                r = self.res_queue.get()
+                if r is not None:
+                    self.episode += 1
+                    self.record(
+                        message=r["worker_name"],
+                        episode=self.episode, 
+                        reward=r["reward"],
+                        episode_length=r["episode_length"],
+                        mean_loss=r["mean_loss"],
+                        gradient_updates=r["gradient_updates"],
+                        mean_value_loss=r["mean_value_loss"],
+                        mean_policy_loss=r["mean_policy_loss"],
+                        mean_advantage=r["mean_advantage"]
+                    )
+                else:
+                    break
+            except Exception as e:
+                logging.error(str(e))
                 break
 
         [w.join() for w in self.workers]
