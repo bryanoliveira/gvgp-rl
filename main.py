@@ -22,6 +22,7 @@ if __name__ == "__main__":
     parser.add_argument('--log', type=int, default=logging.INFO, help='Logging level')
     parser.add_argument('--play', action='store_true', help='Play game')
     parser.add_argument('--game-plays', type=int, default=5, help='Number of game plays')
+    parser.add_argument('--checkpoint-interval', type=int, default=50, help='Number of episode between each checkpoint')
 
     # Setup
     args = parser.parse_args()
@@ -65,12 +66,14 @@ if __name__ == "__main__":
 
         a3c = A3C(
             env_factory = factory or Env.factory(args.game), 
+            play = args.play,
             save_load_path = args.save_load_path,
             skip_load = args.skip_load,
             render = args.render,
             n_workers = args.workers,
             gamma = args.gamma,
             update_global_delay = args.update_global_delay,
+            checkpoint_interval = args.checkpoint_interval,
             max_eps = args.max_eps,
             max_length = args.max_length
         )
@@ -86,12 +89,14 @@ if __name__ == "__main__":
 
         a3c = A3C(
             env_factory = factory or Env.factory(args.game), 
+            play = args.play,
             save_load_path = args.save_load_path,
             skip_load = args.skip_load,
             render = args.render,
             n_workers = args.workers,
             gamma = args.gamma,
             update_global_delay = args.update_global_delay,
+            checkpoint_interval = args.checkpoint_interval,
             max_eps = args.max_eps,
             max_length = args.max_length
         )

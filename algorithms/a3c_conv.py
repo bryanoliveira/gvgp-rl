@@ -185,6 +185,7 @@ class A3C(RLInterface):
     def __init__(
         self, 
         env_factory,
+        play=False,
         save_load_path = "trained_models", 
         skip_load = False,
         render = False,
@@ -207,6 +208,7 @@ class A3C(RLInterface):
         self.env_name = env.name  # to save/load
         
         # free attributes
+        self.checkpoint_interval = checkpoint_interval
         self.render = render
         self.gamma = gamma
         self.save_load_path = save_load_path
@@ -220,7 +222,7 @@ class A3C(RLInterface):
 
         # load network, optimizer, episode count and max_reward
         if not skip_load:
-            self.load()
+            self.load(not play)  # if we want to play we play with the best player, not the last one
 
         self.global_ep_counter = mp.Value('i', self.episode)  # this is needed to control workers episode limit
         self.global_ep_reward = mp.Value('d', 0.)  # current episode reward

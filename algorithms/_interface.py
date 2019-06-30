@@ -7,7 +7,7 @@ import time
 import random
 import numpy as np
 from utils import np_torch_wrap
-import sys
+import os
 
 
 class RLInterface:
@@ -24,6 +24,7 @@ class RLInterface:
         self.is_training = True
         self.env_factory = None
         self.writer = None
+        self.checkpoint_interval = 50
         atexit.register(self.on_exit)
 
     def run(self):
@@ -61,14 +62,14 @@ class RLInterface:
         mean = np.array(reward_mean).mean()
         logging.info(self.logprefix + 'Reward mean ' + str(mean))
 
-    def save(self):
+    def save(self, checkpoint=False):
         if not self.is_training:
             return
 
-        save_path = os.path.join(self.save_load_path, self.name + '_' + self.env_name + '.pth')
+        save_path = os.path.join("checkpoints" if checkpoint else self.save_load_path, self.name + '_' + self.env_name + '.pth')
 
         # backup last saved model in case we corrupt this one
-        sys.exec('mv ' + save_path + ' ' + save_path + '.old')
+        os.system('mv ' + save_path + ' ' + save_path + '.old')
 
         state = {
             'network': self.global_network.state_dict(),
@@ -80,14 +81,12 @@ class RLInterface:
 
         logging.info(self.logprefix + "Model %d saved to %s." % (self.episode, save_path))
 
-    def load(self):
-        load_path = os.path.join(self.save_load_path, self.name + '_' + self.env_name + '.pth')
+    def load(self, checkpoint=False):
+        load_path = os.path.join("checkpoints" if checkpoint else self.save_load_path, self.name + '_' + self.env_name + '.pth')
 
         if os.path.isfile(load_path):
             state = torch.load(load_path, map_location='cpu')
             self.global_network.load_state_dict(state['network'])
-            self.global_network.train()
-            self.global_network.eval()
             self.optimizer.load_state_dict(state['optimizer'])
             self.last_max_reward = state['max_reward']
             self.episode = state['episode']
@@ -129,6 +128,9 @@ class RLInterface:
             if self.last_max_reward == float('-inf') or int(self.last_max_reward) < int(reward):
                 self.last_max_reward = reward
                 self.save()
+
+            if self.episode % self.checkpoint_interval == 0:
+                self.save(True)
 
             self.writer.add_scalar("Time/Episode", time_elapsed, episode)
             if reward: 
