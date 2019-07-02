@@ -104,7 +104,10 @@ if __name__ == "__main__":
         if args.play:
             a3c.play(args.game_plays)
         else:
-             a3c.run()   
+            try:
+                a3c.run()
+            except Exception as e:
+                logging.error(str(e))
     
     elif args.model == 'a2c':
 
