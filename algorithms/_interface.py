@@ -24,6 +24,7 @@ class RLInterface:
         self.is_training = True
         self.env_factory = None
         self.writer = None
+        self.random = False
         self.checkpoint_interval = 50
         atexit.register(self.on_exit)
 
@@ -47,7 +48,11 @@ class RLInterface:
                     env.render()
                     time.sleep(0.03)
 
-                action_index = self.global_network.choose_action(np_torch_wrap(state[None, :]))
+                if self.random:
+                    action_index = env.sample_action()
+                else:
+                    action_index = self.global_network.choose_action(np_torch_wrap(state[None, :]))
+
                 state, reward, terminal, info = env.step(action_index)
                 game_reward += reward
             

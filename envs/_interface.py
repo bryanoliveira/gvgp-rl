@@ -35,3 +35,6 @@ class EnvInterface:
     
     def close(self):
         self.env.close()
+
+    def sample_action(self):
+        return self.env.action_space.sample()
