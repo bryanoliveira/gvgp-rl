@@ -21,6 +21,7 @@ if __name__ == "__main__":
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
     parser.add_argument('--log', type=int, default=logging.INFO, help='Logging level')
     parser.add_argument('--play', action='store_true', help='Play game')
+    parser.add_argument('--random', action='store_true', help='Play with random agent')
     parser.add_argument('--game-plays', type=int, default=5, help='Number of game plays')
     parser.add_argument('--checkpoint-interval', type=int, default=50, help='Number of episode between each checkpoint')
 
@@ -81,7 +82,10 @@ if __name__ == "__main__":
         if args.play:
             a3c.play(args.game_plays)
         else:
-            a3c.run()
+            try:
+                a3c.run()
+            except Exception as e:
+                logging.error(str(e))
 
     elif args.model == 'a3c_conv':
 
@@ -98,13 +102,17 @@ if __name__ == "__main__":
             update_global_delay = args.update_global_delay,
             checkpoint_interval = args.checkpoint_interval,
             max_eps = args.max_eps,
-            max_length = args.max_length
+            max_length = args.max_length,
+            random = args.random
         )
 
         if args.play:
             a3c.play(args.game_plays)
         else:
-             a3c.run()   
+            try:
+                a3c.run()
+            except Exception as e:
+                logging.error(str(e))
     
     elif args.model == 'a2c':
 
