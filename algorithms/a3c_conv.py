@@ -194,13 +194,15 @@ class A3C(RLInterface):
         update_global_delay = 20,
         checkpoint_interval=10,
         max_eps = 10000,
-        max_length = 1000):
+        max_length = 1000,
+        random = False):
 
         super(A3C, self).__init__()
 
         self.name = "A3C_Conv"
         self.logprefix = "\033[0;1mA3C Global: \033[0m"
         self.env_factory = env_factory
+        self.random = random
 
         # init temp env to get it's properties
         logging.info(self.logprefix + "Instantiating environment...")
