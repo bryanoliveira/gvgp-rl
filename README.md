@@ -1,5 +1,5 @@
 # General Video Game Playing Reinforcement Learning Agents
-A collection of reinforcement learning algorithms applied to General Video Game Playing. A good overview can be found [on this paper](https://arxiv.org/pdf/1802.10363.pdf).
+A collection of reinforcement learning algorithms applied to General Video Game Playing. A good overview about the problem can be found [on this paper](https://arxiv.org/pdf/1802.10363.pdf).
 
 ## Requirements
 - Python3
