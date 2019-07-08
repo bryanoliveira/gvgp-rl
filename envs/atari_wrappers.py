@@ -5,6 +5,7 @@
 import numpy as np
 from collections import deque
 import gym
+import gym_gvgai
 from gym import spaces
 import cv2
 cv2.ocl.setUseOpenCL(False)
@@ -18,7 +19,7 @@ class NoopResetEnv(gym.Wrapper):
         self.noop_max = noop_max
         self.override_num_noops = None
         self.noop_action = 0
-        assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
+        # assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
 
     def reset(self, **kwargs):
         """ Do no-op action for a number of steps in [1, noop_max]."""
@@ -26,7 +27,7 @@ class NoopResetEnv(gym.Wrapper):
         if self.override_num_noops is not None:
             noops = self.override_num_noops
         else:
-            noops = self.unwrapped.np_random.randint(1, self.noop_max + 1) #pylint: disable=E1101
+            noops = np.random.randint(1, self.noop_max + 1) #pylint: disable=E1101
         assert noops > 0
         obs = None
         for _ in range(noops):
@@ -235,7 +236,7 @@ class PytorchImage(gym.ObservationWrapper):
 
 def make_atari(env_id):
     env = gym.make(env_id)
-    assert 'NoFrameskip' in env.spec.id
+    # assert 'NoFrameskip' in env.spec.id
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
     return env

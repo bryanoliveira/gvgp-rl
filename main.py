@@ -36,14 +36,14 @@ if __name__ == "__main__":
     )
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
-    if args.wrapper == 'atari_conv':
+    if args.wrapper == 'gvgai' or args.game == "gvgai-combo":
+        from envs.gvgai import Env
+    elif args.wrapper == 'atari_conv':
         from envs.atari_conv import Env
     elif args.wrapper == 'atari':
         from envs.atari import Env
         if args.game == 'gvgai-cec1-lvl0-v0':
             args.game = 'SpaceInvaders-v0'
-    elif args.wrapper == 'gvgai' or args.game == "gvgai-combo":
-        from envs.gvgai import Env
     elif args.wrapper == 'gym':
         from envs.gym import Env
         if args.game == 'gvgai-cec1-lvl0-v0':

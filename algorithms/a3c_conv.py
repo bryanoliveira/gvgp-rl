@@ -7,7 +7,6 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
-import random
 import logging
 
 from algorithms._interface import RLInterface
@@ -236,7 +235,7 @@ class A3C(RLInterface):
             Worker(
                 worker_name=i,
                 # assign a random environment for each worker, if multiple envs are received 
-                env_factory = env_factory[random.randint(0, len(env_factory) - 1)] if type(env_factory) is list else env_factory, 
+                env_factory = env_factory[np.random.randint(0, len(env_factory) - 1)] if type(env_factory) is list else env_factory, 
                 f_checkpoint = self.checkpoint,
                 f_sync = self.sync,
                 res_queue = self.res_queue,

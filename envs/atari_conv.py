@@ -15,7 +15,7 @@ class Env(EnvInterface):
 
 
     def reset(self):
-        state = self.env.reset()        
+        state = self.env.reset()
         return state.__array__()
 
     def step(self, action):
@@ -25,10 +25,3 @@ class Env(EnvInterface):
 
     def factory(env_name):
         return lambda : Env(env_name)
-
-    def _preprocess(self, state):
-        state = cv2.resize(np.float32(state), (self._img_size, self._img_size), interpolation=cv2.INTER_LINEAR)
-        state = cv2.cvtColor(np.float32(state), cv2.COLOR_BGR2GRAY)
-        state = state / 255  # transforma a imagem num vetor e normaliza para 0~1
-        return state
-    
